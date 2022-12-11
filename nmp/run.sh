@@ -10,6 +10,6 @@ do
      for (( i = 0; i < 5; i++ ))
 	do	
 		./nmp --server $n_threads &
-        time ./nmp --client $n_threads
+        time ./nmp --client 1
     done
 done

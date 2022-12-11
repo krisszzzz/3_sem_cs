@@ -18,7 +18,7 @@ typedef struct sockaddr sockaddr;
 
 typedef enum
 {
-    ENULL = -15,
+    ENULL = -16,
     ELIMIT,
     EPTHREAD,
     ETIMEOUT,
@@ -31,6 +31,7 @@ typedef enum
     ECONNECT,
     EACCEPT,
     EWRITE,
+    EREAD,
     EBIND,
     ELISTEN
     
@@ -43,7 +44,16 @@ typedef struct Chunk
 	double y_max;
 	
 	int n_points;
+    int n_internal_points;
 } Chunk;
+
+
+// Information provided from server-side
+typedef struct
+{
+    int16_t port; // port to start tcp connection
+    int n_cores; // number of cores available on servers
+} ServerInfo_t;
 
 #define exp_x_2(x) exp((x)*(x))
 
@@ -51,6 +61,7 @@ int servers_start( int n_servers);
 
 ErrEnum_t
 get_server_list( sockaddr_in** server_list,
+                 int** n_cores,
                  int max_n_server);
 
 ErrEnum_t

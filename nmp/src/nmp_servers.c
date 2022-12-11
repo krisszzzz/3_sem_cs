@@ -24,7 +24,7 @@ init_thread_seed( unsigned short xsubi[3])
 	xsubi[2] = rand();
 }
 
-static int 
+static void 
 calc_chunk_internal_points( Chunk *const chunk)
 { 
 	assert( chunk != NULL);
@@ -51,12 +51,12 @@ calc_chunk_internal_points( Chunk *const chunk)
 		}
 	}
 
-	return n_internal_points;
+    chunk->n_internal_points = n_internal_points;
 }
 
 
 static void
-join_threads( const pthread_t tids[],
+join_threads( pthread_t* tids,
               const int n_threads)
 {
 	for ( int i = 0; i < n_threads; i++ )
@@ -65,29 +65,61 @@ join_threads( const pthread_t tids[],
 	}
 }
 
-static void
-handle_client( void* args)
+static void*
+wrapper_calc_chunk_internal_points( void *const args)
 {
-    // udp_sockfds for broadcast, tcp_sockfds for connection
-    int udp_sockfds = socket( AF_INET, SOCK_DGRAM, 0);
-    int tcp_sockfds = socket( AF_INET, SOCK_STREAM, 0);
+	assert( args != NULL);
+
+	Chunk *const chunk = (Chunk*)args;
+
+	calc_chunk_internal_points( chunk);
+	
+	pthread_exit( NULL);
+}
+
+static void
+cancel_threads( pthread_t* tids,
+                const int n_threads)
+{
+	for ( int i = 0; i < n_threads; i++ )
+	{
+		pthread_cancel( tids[i]);
+	}
+}
+
+
+static int
+calc_internal_points( Chunk* threads_chunk,
+                      const int n_threads)
+{
+    int n_internal_points = 0;
+    for ( int i = 0; i < n_threads; i++ )
+    {
+        n_internal_points += threads_chunk[i].n_internal_points;
+    }
+
+    return n_internal_points;
+}
+
+ErrEnum_t
+servers_start( int n_threads)
+{
+    srand( time( NULL));
+    
+    // udp_sockfd for broadcast, tcp_sockfd for connection
+    int udp_sockfd = socket( AF_INET, SOCK_DGRAM, 0);
 
     SYS_CHECKIT(
-        udp_sockfds,
+        udp_sockfd,
 
-        pthread_exit( NULL);
+        return ESOCKCREATE;
     );
     
     SYS_CHECKIT(
-        tcp_sockfds,
-        
-        pthread_exit( NULL);
-    );
+        setsockopt( udp_sockfd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)),
 
-    SYS_CHECKIT(
-        setsockopt( udp_sockfds, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)),
-
-        pthread_exit( NULL);
+        close( udp_sockfd);
+        return ESOCKOPT;
     );
 
     sockaddr_in client_addr =
@@ -99,9 +131,9 @@ handle_client( void* args)
     };
 
     SYS_CHECKIT(
-        bind( udp_sockfds, &client_addr, sizeof( client_addr)),
+        bind( udp_sockfd, &client_addr, sizeof( client_addr)),
 
-        pthread_exit( NULL);
+        return EBIND;
     );
 
     sockaddr_in recv_addr = { 0 };
@@ -110,103 +142,144 @@ handle_client( void* args)
     int addr_size = sizeof( client_addr);
 
     SYS_CHECKIT(
-        recvfrom( udp_sockfds, &skip_msg, sizeof( skip_msg), 0, &recv_addr, &addr_size),
+        recvfrom( udp_sockfd, &skip_msg, sizeof( skip_msg), 0, &recv_addr, &addr_size),
 
-        pthread_exit( NULL);
+        return ERECVFROM;
     );
-
 
     // Get thread id of current thread and use this number as port,
     // because we cannot use listen on same port
 
-    uint16_t port = htons( gettid()); 
-    client_addr.sin_port = port;
+    ServerInfo_t server_info =
+    {
+        .port = htons( getpid()),
+        .n_cores = n_threads
+    };
+
+    client_addr.sin_port = server_info.port;
     
     SYS_CHECKIT(
-        sendto( udp_sockfds, &port, sizeof( uint16_t), 0, &recv_addr, sizeof( recv_addr)),
+        sendto( udp_sockfd, &server_info, sizeof( ServerInfo_t),
+                0,           &recv_addr,  sizeof( recv_addr)),
 
-        pthread_exit( NULL);
+        return ESENDTO;
     );
 
     // close connection and open tcp connection
-    close( udp_sockfds);
+    close( udp_sockfd);
 
+    int tcp_sockfd = socket( AF_INET, SOCK_STREAM, 0);
 
     SYS_CHECKIT(
-        setsockopt( tcp_sockfds, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)),
+        tcp_sockfd,
+        
+        return ESOCKCREATE;
+    );
 
-        pthread_exit( NULL);
+    SYS_CHECKIT(
+        setsockopt( tcp_sockfd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)),
+
+        close( tcp_sockfd);
+        return ESOCKOPT;
     );
 
 
 
     SYS_CHECKIT(
-        bind( tcp_sockfds, &client_addr, sizeof( client_addr)),
+        bind( tcp_sockfd, &client_addr, sizeof( client_addr)),
 
-        pthread_exit( NULL);
+        close( tcp_sockfd);
+        return EBIND;
     );
 
     SYS_CHECKIT(
-        listen( tcp_sockfds, 1),
-
-        pthread_exit( NULL);
+        listen( tcp_sockfd, 1),
+        
+        close( tcp_sockfd);
+        return ELISTEN;
     );
 
-    int connfd = accept( tcp_sockfds, NULL, NULL);
+    int connfd = accept( tcp_sockfd, NULL, NULL);
 
     SYS_CHECKIT(
         connfd,
 
-        pthread_exit( NULL);
+        close( tcp_sockfd);
+        return EACCEPT;
     );
 
+    Chunk client_chunk = { 0 };
 
-
-    Chunk chunk = { 0 };
     SYS_CHECKIT(
-        read( connfd, &chunk, sizeof( Chunk)),
+        read( connfd, &client_chunk, sizeof( Chunk)),
 
-        pthread_exit( NULL);
-    );
-    
-    int internal_points = calc_chunk_internal_points( &chunk);
-    
-    SYS_CHECKIT(
-        write( connfd, &internal_points, sizeof( int)),
-
-        pthread_exit( NULL);
+        close( tcp_sockfd);
+        close( connfd);
+        return EREAD;
     );
 
-    close( connfd);
-    close( tcp_sockfds);
-}
-
-ErrEnum_t
-servers_start( int n_servers)
-{
-    srand( time( NULL));
-    
-    pthread_t* threads = calloc( n_servers, sizeof(pthread_t));
+    pthread_t* threads = calloc( n_threads, sizeof(pthread_t));
     
     CHECKIT(
         threads == NULL,
 
+        close( tcp_sockfd);
+        close( connfd);
         return EALLOC;
     );
 
-    for ( int i = 0; i < n_servers; i++ )
-    {
-        SYS_CHECKIT(
-            pthread_create( &threads[i], NULL, handle_client, NULL),
+    Chunk* threads_chunk = calloc( n_threads, sizeof(Chunk));
 
+    CHECKIT(
+        threads_chunk == NULL,
+
+        close( tcp_sockfd);
+        close( connfd);
+        free( threads);
+        return EALLOC;
+    );
+
+    // divide number of points for threads
+    const double x_range  = client_chunk.x_range / (double)n_threads;
+    const int    n_points = client_chunk.n_points / n_threads;
+
+    for ( int i = 0; i < n_threads; i++ )
+    {
+        threads_chunk[i] = client_chunk;
+        threads_chunk[i].n_points = n_points;
+        threads_chunk[i].x_range  = x_range;
+        // move min for next thread
+        threads_chunk[i].x_min   += x_range * i;
+
+        SYS_CHECKIT(
+            pthread_create( &threads[i], NULL, wrapper_calc_chunk_internal_points, &threads_chunk[i]),
+
+            close( tcp_sockfd);
+            close( connfd);
+            cancel_threads( threads, n_threads);
             free( threads);
+            free( threads_chunk);
             return EPTHREAD;
         );
     }
 
-    join_threads( threads, n_servers);
+    join_threads( threads, n_threads);
+
+    int internal_points = calc_internal_points( threads_chunk, n_threads);
+    
+    SYS_CHECKIT(
+        write( connfd, &internal_points, sizeof( int)),
+
+        close( connfd);
+        close( tcp_sockfd);
+        return EWRITE;
+    );
 
     free( threads);
+    free( threads_chunk);
+
+    close( connfd);
+    close( tcp_sockfd);
 
     return 0;
 }

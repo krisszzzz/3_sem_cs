@@ -13,7 +13,8 @@
 
 
 ErrEnum_t
-get_server_list( sockaddr_in** server_list,
+get_server_list( sockaddr_in** available_addrs,
+                 int** n_cores,
                  int max_n_server)
 {
     int client_socket = socket( AF_INET, SOCK_DGRAM, 0);
@@ -55,6 +56,15 @@ get_server_list( sockaddr_in** server_list,
         return EALLOC;
     );
 
+    int* tmp_n_cores = calloc( max_n_server, sizeof( sockaddr_in));
+
+    CHECKIT(
+       tmp_n_cores == NULL,
+       
+       free( tmp_addr_ptr);
+       return EALLOC;
+    );
+
     struct pollfd pollin = { 0 };
     pollin.events = POLLIN;
     pollin.fd = client_socket;
@@ -70,6 +80,7 @@ get_server_list( sockaddr_in** server_list,
 
             close( client_socket);
             free( tmp_addr_ptr);
+            free( tmp_n_cores);
             
             return EPOLL;
         );
@@ -80,6 +91,7 @@ get_server_list( sockaddr_in** server_list,
 
             close( client_socket);
             free( tmp_addr_ptr);
+            free( tmp_n_cores);
 
             return ETIMEOUT;
         };
@@ -87,10 +99,10 @@ get_server_list( sockaddr_in** server_list,
         pollin.revents = 0;
 
         sockaddr_in tmp_addr = { 0 };
-        uint16_t port = 0;
+        ServerInfo_t server_info = { 0 };
 
         SYS_CHECKIT(
-            recvfrom( client_socket, &port, sizeof( port), 0,
+            recvfrom( client_socket, &server_info, sizeof( server_info), 0,
                       &tmp_addr, &(int) { sizeof(sockaddr_in) }),
 
             close( client_socket);
@@ -99,11 +111,15 @@ get_server_list( sockaddr_in** server_list,
             return ERECVFROM;
         );
 
-        tmp_addr.sin_port = port;
+        tmp_n_cores[n_server] = server_info.n_cores;
+
+        // get server port through socket 
+        tmp_addr.sin_port = server_info.port;
         tmp_addr_ptr[n_server] = tmp_addr;
     }
 
-    *server_list = tmp_addr_ptr;
+    *available_addrs = tmp_addr_ptr;
+    *n_cores = tmp_n_cores;
    
     close( client_socket);
     
@@ -183,6 +199,21 @@ close_all( int* sockfds,
     }
 }
 
+// get all avaialble server cores count
+static int
+get_all_cores( int* n_cores,
+               int n_servers)
+{
+    int all_cores = 0;
+
+    for ( int i = 0; i < n_servers; i++ )
+    {
+        all_cores += n_cores[i];
+    }
+
+    return all_cores;
+}
+
 ErrEnum_t
 integral_exp_x_2( double* result,
                   int n_servers,
@@ -217,32 +248,36 @@ integral_exp_x_2( double* result,
     );
 
     sockaddr_in* server_list = NULL;
+    int* n_cores = NULL;
     
-    RE_CHECKIT( get_server_list( &server_list, n_servers),
+    RE_CHECKIT( get_server_list( &server_list, &n_cores, n_servers),
                 close_all( sockfds, n_servers);
-                free(chunks);
+                free( chunks);
                 free( sockfds); );
 
     RE_CHECKIT( connect_servers( server_list, sockfds, n_servers),
                 close_all( sockfds, n_servers);
-                free(chunks);
+                free( chunks);
                 free( sockfds); );
 
-	const double   x_range        = (x_max - x_min);
-	const double   x_chunk_range  = x_range / (double)n_servers;
-	const double   y_max          = exp_x_2( x_max);
-	const uint32_t n_chunk_points = n_points / n_servers;
+	const double   x_range     = (x_max - x_min);
+	const double   y_max       = exp_x_2( x_max);
+    const int      n_all_cores = get_all_cores( n_cores, n_servers);
+    
+    double   x_chunk_min    = x_min;
 
     for ( int i = 0; i < n_servers; i++ )
     {
-		const double x_chunk_min = x_min + x_chunk_range * i;
+        // divide range and number of points dependeping of how much cores avaialble
+        // on server
+        double x_chunk_range  = n_cores[i] * x_range / (double)n_all_cores;
 
 		Chunk* const chunk = chunks + i;
 
 		chunk->x_min             = x_chunk_min;
 		chunk->x_range           = x_chunk_range;	
 		chunk->y_max             = y_max;
-		chunk->n_points          = n_chunk_points;
+		chunk->n_points          = ( n_cores[i] * n_points) / n_all_cores;
 
        SYS_CHECKIT(
           write( sockfds[i], chunk, sizeof( Chunk)),
@@ -253,15 +288,23 @@ integral_exp_x_2( double* result,
           free( sockfds);
           return EWRITE;
        );
+
+       // move min for next server
+       x_chunk_min += x_chunk_range;
     }
 
     int n_internal_points = calc_internal_points( sockfds, n_servers);
-    close_all( sockfds, n_servers);
 
 	const double square   = x_range * y_max;
     const double coverage = (double)n_internal_points / n_points;
 
     *result = coverage * square;
+
+    free( chunks);
+    free( server_list);
+    free( sockfds);
+    free( n_cores);
+    close_all( sockfds, n_servers);
 
     return 0;
 }
