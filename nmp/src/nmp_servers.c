@@ -19,37 +19,37 @@
 static void
 init_thread_seed( unsigned short xsubi[3])
 {
-	xsubi[0] = rand();
-	xsubi[1] = rand();
-	xsubi[2] = rand();
+    xsubi[0] = rand();
+    xsubi[1] = rand();
+    xsubi[2] = rand();
 }
 
 static void 
 calc_chunk_internal_points( Chunk *const chunk)
 { 
-	assert( chunk != NULL);
+    assert( chunk != NULL);
 
-	unsigned short xsubi[3] = { 0 }; // external storage for random function
-	init_thread_seed( xsubi);
+    unsigned short xsubi[3] = { 0 }; // external storage for random function
+    init_thread_seed( xsubi);
 
-	const double x_min    = chunk->x_min;
-	const double x_range  = chunk->x_range;
-	const double y_max    = chunk->y_max;	
-	const int n_points    = chunk->n_points;
+    const double x_min    = chunk->x_min;
+    const double x_range  = chunk->x_range;
+    const double y_max    = chunk->y_max;
+    const int n_points    = chunk->n_points;
 
-	int n_internal_points = 0;	
+    int n_internal_points = 0;
 
-	for ( int i = 0; i < n_points; i++ )
-	{
-		double x_rand = erand48( xsubi) * x_range + x_min;
-		double y_rand = erand48( xsubi) * y_max;
-		double y_func = exp_x_2( x_rand);
+    for ( int i = 0; i < n_points; i++ )
+    {
+        double x_rand = erand48( xsubi) * x_range + x_min;
+        double y_rand = erand48( xsubi) * y_max;
+        double y_func = exp_x_2( x_rand);
 
-		if ( y_rand < y_func )
-		{
-			n_internal_points++;
-		}
-	}
+        if ( y_rand < y_func )
+        {
+            n_internal_points++;
+        }
+    }
 
     chunk->n_internal_points = n_internal_points;
 }
@@ -59,32 +59,32 @@ static void
 join_threads( pthread_t* tids,
               const int n_threads)
 {
-	for ( int i = 0; i < n_threads; i++ )
-	{
-		pthread_join( tids[i], NULL);
-	}
+    for ( int i = 0; i < n_threads; i++ )
+    {
+        pthread_join( tids[i], NULL);
+    }
 }
 
 static void*
 wrapper_calc_chunk_internal_points( void *const args)
 {
-	assert( args != NULL);
+    assert( args != NULL);
 
-	Chunk *const chunk = (Chunk*)args;
+    Chunk *const chunk = (Chunk*)args;
 
-	calc_chunk_internal_points( chunk);
-	
-	pthread_exit( NULL);
+    calc_chunk_internal_points( chunk);
+
+    pthread_exit( NULL);
 }
 
 static void
 cancel_threads( pthread_t* tids,
                 const int n_threads)
 {
-	for ( int i = 0; i < n_threads; i++ )
-	{
-		pthread_cancel( tids[i]);
-	}
+    for ( int i = 0; i < n_threads; i++ )
+    {
+        pthread_cancel( tids[i]);
+    }
 }
 
 

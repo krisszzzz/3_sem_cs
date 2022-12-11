@@ -176,16 +176,16 @@ static int
 calc_internal_points( int* sockfds,
                       const int n_servers)
 {
-	int n_internal_points = 0;
-
-	for ( int i = 0; i < n_servers; i++ )
-	{
+    int n_internal_points = 0;
+    
+    for ( int i = 0; i < n_servers; i++ )
+    {
         int chunk_internal_points = 0;
-		read( sockfds[i], &chunk_internal_points, sizeof( int));
+        read( sockfds[i], &chunk_internal_points, sizeof( int));
         n_internal_points += chunk_internal_points;
-	}
-
-	return n_internal_points;
+    }
+    
+    return n_internal_points;
 }
 
 
@@ -238,7 +238,7 @@ integral_exp_x_2( double* result,
     int* sockfds = NULL;
     RE_CHECKIT( init_sockets( &sockfds, n_servers));
 
-	Chunk* chunks = calloc( n_servers, sizeof(Chunk));
+    Chunk* chunks = calloc( n_servers, sizeof(Chunk));
 
     CHECKIT(
        chunks == NULL,
@@ -260,8 +260,8 @@ integral_exp_x_2( double* result,
                 free( chunks);
                 free( sockfds); );
 
-	const double   x_range     = (x_max - x_min);
-	const double   y_max       = exp_x_2( x_max);
+    const double   x_range     = (x_max - x_min);
+    const double   y_max       = exp_x_2( x_max);
     const int      n_all_cores = get_all_cores( n_cores, n_servers);
     
     double   x_chunk_min    = x_min;
@@ -272,12 +272,12 @@ integral_exp_x_2( double* result,
         // on server
         double x_chunk_range  = n_cores[i] * x_range / (double)n_all_cores;
 
-		Chunk* const chunk = chunks + i;
+        Chunk* const chunk = chunks + i;
 
-		chunk->x_min             = x_chunk_min;
-		chunk->x_range           = x_chunk_range;	
-		chunk->y_max             = y_max;
-		chunk->n_points          = ( n_cores[i] * n_points) / n_all_cores;
+        chunk->x_min             = x_chunk_min;
+        chunk->x_range           = x_chunk_range;    
+        chunk->y_max             = y_max;
+        chunk->n_points          = ( n_cores[i] * n_points) / n_all_cores;
 
        SYS_CHECKIT(
           write( sockfds[i], chunk, sizeof( Chunk)),
@@ -295,7 +295,7 @@ integral_exp_x_2( double* result,
 
     int n_internal_points = calc_internal_points( sockfds, n_servers);
 
-	const double square   = x_range * y_max;
+    const double square   = x_range * y_max;
     const double coverage = (double)n_internal_points / n_points;
 
     *result = coverage * square;
